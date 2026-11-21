@@ -93,6 +93,7 @@ input,select,textarea{font:inherit}
 .wrap{margin:12px 14px;border-radius:14px;overflow:auto;background:#fff}
 .rframe{position:fixed;inset:0;background:#fff;z-index:15;display:flex;flex-direction:column}
 .rframe iframe{flex:1;border:0;width:100%}
+.fbar{display:flex;gap:8px;padding:8px 12px;background:#F4F6FA;border-bottom:1px solid #E3E7EF}.fbar button{flex:1;padding:10px 6px;border-radius:10px;background:#1F2A44;color:#fff;font-weight:700;font-size:14px}.fbar button.g{background:#1F8A4C}.fbar button:disabled{opacity:.6}.fmsg{font-size:12px;color:#1F2A44;padding:2px 12px}
 .note{font-size:12.5px;color:#5B6472;padding:4px 18px}
 .empty{padding:30px 18px;text-align:center;color:#8A93A5;font-size:14px}
 nav{position:fixed;bottom:0;left:0;right:0;max-width:520px;margin:0 auto;height:calc(66px + env(safe-area-inset-bottom));padding-bottom:env(safe-area-inset-bottom);background:#fff;border-top:1px solid #E3E6EC;display:flex;justify-content:space-around;z-index:6}
@@ -120,7 +121,7 @@ nav button.on{color:#1F2A44;font-weight:700}nav button.on svg{color:#B8933A}
   <div class="fld"><label>Sign in as</label><button type="button" class="sel" id="who"><span id="whoT">Choose your name or region</span><span>▾</span></button></div>
   <div class="fld"><label>Password</label><input class="inp" id="pw" type="password" autocomplete="current-password" placeholder="Password"></div>
   <button class="gobtn" id="go">Sign in</button>
-  <label class="rem"><input type="checkbox" id="remember" checked> Remember me on this phone</label>
+  
   <div class="lmsg" id="lmsg"></div>
   <div class="ver"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 21s-7-6.2-7-11.5A7 7 0 0 1 19 9.5C19 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/></svg><span>Othman Nour El-Din St., Zagazig, Egypt</span></div>
 </div></div>
@@ -133,10 +134,80 @@ nav button.on{color:#1F2A44;font-weight:700}nav button.on svg{color:#B8933A}
   <button data-v="prices"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 12l-8 8-9-9V3h8z"/><circle cx="7.5" cy="7.5" r="1.5"/></svg><span>الأسعار</span></button>
   <button data-v="me"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg><span>حسابي</span></button>
 </nav>
+<script>const MM = 96 / 25.4;
+const imgLoad = src => new Promise((res, rej) => { const im = new Image(); im.onload = () => res(im); im.onerror = () => rej(new Error('تعذّر رسم الصفحة')); im.src = src; });
+const b64Bytes = s => { const b = atob(s), u = new Uint8Array(b.length); for (let i = 0; i < b.length; i++) u[i] = b.charCodeAt(i); return u; };
+const docIsLand = html => html.indexOf('size:A4 landscape') !== -1;
+const xmlEsc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;');
+function loadFrame(html, w) {
+    return new Promise(res => {
+      const fr = document.createElement('iframe'); fr.setAttribute('aria-hidden', 'true'); fr.tabIndex = -1;
+      fr.style.cssText = 'position:fixed;left:-99999px;top:0;width:' + w + 'px;height:1200px;border:0';
+      fr.onload = async () => { try { const d = fr.contentDocument; if (d.fonts && d.fonts.ready) await d.fonts.ready; } catch (e) { /* مش لازم */ } setTimeout(() => res(fr), 150); };
+      fr.srcdoc = html; document.body.appendChild(fr);
+    });
+  }
+async function docPages(html) {
+    const land = docIsLand(html), _pm = [...html.matchAll(/@page\s*\{\s*size:\s*([\d.]+)mm\s+([\d.]+)mm/g)].pop(), PW = _pm ? +_pm[1] : (land ? 297 : 210), PH = _pm ? +_pm[2] : (land ? 210 : 297), MX = 10, MY = 12, scale = 2;
+    const W = Math.round((PW - 2 * MX) * MM), H = Math.floor((PH - 2 * MY) * MM);
+    const fr = await loadFrame(html.replace('</head>', '<style>html,body{width:' + W + 'px!important;margin:0!important;padding:0!important}</style></head>'), W);
+    const out = [];
+    try {
+      const d = fr.contentDocument, css = [...d.querySelectorAll('style')].map(s => s.textContent).join('\n');
+      const pages = [...d.body.children].filter(x => x.classList && x.classList.contains('page'));
+      const nodes = pages.length ? pages : [d.body];
+      for (const node of nodes) {
+        const r = node.getBoundingClientRect(), top = r.top, total = Math.max(1, Math.ceil(r.height));
+        const cuts = [0];
+        if (total > H + 3) {
+          // القطع عند آخر صف جدول أو آخر عنصر، علشان مفيش سطر يتقسم على صفحتين
+          const marks = [...node.querySelectorAll('tr'), ...node.children].map(x => Math.round(x.getBoundingClientRect().bottom - top)).filter(v => v > 0).sort((a, b) => a - b);
+          let y = 0;
+          while (total - y > H + 3) { let best = 0; for (const m of marks) { if (m > y + H) break; if (m > y) best = m; } if (!best) best = y + H; cuts.push(best); y = best; }
+        }
+        const ser = new XMLSerializer().serializeToString(node === d.body ? (() => { const w = d.createElement('div'); [...d.body.childNodes].forEach(c => w.appendChild(c.cloneNode(true))); return w; })() : node);
+        for (let i = 0; i < cuts.length; i++) {
+          const y0 = cuts[i], h = Math.max(1, Math.min((i + 1 < cuts.length ? cuts[i + 1] : total) - y0, H));
+          const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="' + (W * scale) + '" height="' + (h * scale) + '" viewBox="0 0 ' + W + ' ' + h + '"><foreignObject x="0" y="0" width="' + W + '" height="' + h + '"><body xmlns="http://www.w3.org/1999/xhtml" style="margin:0;padding:0;width:' + W + 'px;height:' + h + 'px;overflow:hidden;background:#fff"><style>' + xmlEsc(css) + '</style><div style="margin-top:' + (-y0) + 'px">' + ser + '</div></body></foreignObject></svg>';
+          const cv = document.createElement('canvas'); cv.width = Math.round(PW * MM * scale); cv.height = Math.round(PH * MM * scale);
+          const g = cv.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, cv.width, cv.height);
+          const im = await imgLoad('data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg));
+          g.drawImage(im, Math.round(MX * MM * scale), Math.round(MY * MM * scale));
+          out.push({ w: cv.width, h: cv.height, land: land, jpg: b64Bytes(cv.toDataURL('image/jpeg', 0.86).split(',')[1]) });
+        }
+      }
+    } finally { fr.remove(); }
+    if (!out.length) throw new Error('مفيش صفحات');
+    return out;
+  }
+function pdfBuild(pages) {
+    const enc = new TextEncoder(), parts = [], offs = []; let pos = 0;
+    const push = b => { parts.push(b); pos += b.length; };
+    const str = s => push(enc.encode(s));
+    const obj = (n, body) => { offs[n] = pos; str(n + ' 0 obj\n' + body + '\nendobj\n'); };
+    push(new Uint8Array([37, 80, 68, 70, 45, 49, 46, 52, 10, 37, 226, 227, 207, 211, 10]));
+    obj(1, '<< /Type /Catalog /Pages 2 0 R >>');
+    obj(2, '<< /Type /Pages /Count ' + pages.length + ' /Kids [' + pages.map((p, i) => (3 + i * 3) + ' 0 R').join(' ') + '] >>');
+    pages.forEach((p, i) => {
+      const n = 3 + i * 3, w = p.land ? 841.89 : 595.28, h = p.land ? 595.28 : 841.89;
+      obj(n, '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ' + w + ' ' + h + '] /Resources << /XObject << /Im0 ' + (n + 1) + ' 0 R >> >> /Contents ' + (n + 2) + ' 0 R >>');
+      offs[n + 1] = pos;
+      str((n + 1) + ' 0 obj\n<< /Type /XObject /Subtype /Image /Width ' + p.w + ' /Height ' + p.h + ' /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ' + p.jpg.length + ' >>\nstream\n');
+      push(p.jpg); str('\nendstream\nendobj\n');
+      const c = 'q ' + w + ' 0 0 ' + h + ' 0 0 cm /Im0 Do Q';
+      obj(n + 2, '<< /Length ' + c.length + ' >>\nstream\n' + c + '\nendstream');
+    });
+    const total = 2 + pages.length * 3, xref = pos;
+    let x = 'xref\n0 ' + (total + 1) + '\n0000000000 65535 f \n';
+    for (let n = 1; n <= total; n++) x += String(offs[n]).padStart(10, '0') + ' 00000 n \n';
+    str(x + 'trailer\n<< /Size ' + (total + 1) + ' /Root 1 0 R >>\nstartxref\n' + xref + '\n%%EOF\n');
+    const out = new Uint8Array(pos); let o = 0; parts.forEach(b => { out.set(b, o); o += b.length; });
+    return out;
+  }</script>
 <script>
 (function () {
   'use strict';
-  var VER = 121;
+  var VER = 132;
   var LS = (function () { try { var t = '__pv'; localStorage.setItem(t, '1'); localStorage.removeItem(t); return localStorage; } catch (e) { var m = {}; return { getItem: function (k) { return k in m ? m[k] : null; }, setItem: function (k, v) { m[k] = String(v); }, removeItem: function (k) { delete m[k]; } }; } })();
   var SS = (function () { try { var t = '__pv'; sessionStorage.setItem(t, '1'); sessionStorage.removeItem(t); return sessionStorage; } catch (e) { var m = {}; return { getItem: function (k) { return k in m ? m[k] : null; }, setItem: function (k, v) { m[k] = String(v); }, removeItem: function (k) { delete m[k]; } }; } })();
   var $ = function (id) { return document.getElementById(id); };
@@ -201,7 +272,7 @@ nav button.on{color:#1F2A44;font-weight:700}nav button.on svg{color:#B8933A}
     $('go').disabled = true; $('lmsg').textContent = 'Opening…';
     try {
       P = await open(await getJSON('data/' + cur + '.json'), pw);
-      LS.setItem('pvWho', cur); if ($('remember').checked) LS.setItem('pvPw', pw); else LS.removeItem('pvPw');
+      LS.setItem('pvWho', cur); LS.removeItem('pvPw'); /* 131: كلمة السر مش بتتحفظ على الموبايل */
       SS.setItem('pvPw', pw); start();
     } catch (e) { $('lmsg').textContent = e.message === 'bad-password' ? 'Wrong password.' : 'No internet and no saved copy yet. Try again with internet.'; }
     $('go').disabled = false;
@@ -271,9 +342,25 @@ nav button.on{color:#1F2A44;font-weight:700}nav button.on svg{color:#B8933A}
   }
   function frame(html, title) {
     var d = document.createElement('div'); d.className = 'rframe';
-    d.innerHTML = topBar(title, true).replace('data-act="back"', 'data-act="closeframe"') + '<iframe sandbox="allow-same-origin allow-modals allow-popups allow-downloads"></iframe>';
+    d.innerHTML = topBar(title, true).replace('data-act="back"', 'data-act="closeframe"') + '<div class="fbar"><button data-act="fpdf">PDF</button><button class="g" data-act="fshare">مشاركة / واتساب</button></div><div class="fmsg"></div><iframe sandbox="allow-same-origin allow-modals allow-popups allow-downloads"></iframe>';
     document.body.appendChild(d); d.querySelector('iframe').srcdoc = html;
-    d.addEventListener('click', function (e) { if (e.target.closest('[data-act="closeframe"]')) d.remove(); });
+    var pdf = null, msg = d.querySelector('.fmsg'), name = String(title || 'PROVET').replace(/[\\/:*?"<>|]+/g, ' ').trim() + '.pdf';
+    async function mk() { if (pdf) return pdf; msg.textContent = 'جاري تجهيز ملف PDF...'; try { pdf = pdfBuild(await docPages(html)); msg.textContent = ''; return pdf; } catch (e) { msg.textContent = 'ملف PDF ما اتجهزش على الموبايل ده.'; return null; } }
+    function dl(b) { var u = URL.createObjectURL(new Blob([b], { type: 'application/pdf' })), a = document.createElement('a'); a.href = u; a.download = name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(function () { URL.revokeObjectURL(u); }, 60000); }
+    d.addEventListener('click', async function (e) {
+      if (e.target.closest('[data-act="closeframe"]')) { d.remove(); return; }
+      var b = e.target.closest('[data-act="fpdf"],[data-act="fshare"]'); if (!b) return;
+      b.disabled = true;
+      try {
+        var bytes = await mk(); if (!bytes) return;
+        if (b.dataset.act === 'fshare') {
+          var f = null; try { f = new File([bytes], name, { type: 'application/pdf' }); } catch (x) { f = null; }
+          if (f && navigator.canShare && navigator.canShare({ files: [f] })) { try { await navigator.share({ files: [f], title: title }); return; } catch (x) { if (x && x.name === 'AbortError') return; } }
+          dl(bytes); msg.textContent = 'الملف اتنزّل. ابعته من الواتساب كمستند.'; return;
+        }
+        dl(bytes); msg.textContent = 'اتنزّل ' + name + ' — هتلاقيه في التنزيلات.';
+      } finally { b.disabled = false; }
+    });
   }
   document.addEventListener('click', function (e) {
     var t = e.target.closest('[data-c],[data-act],[data-sel],[data-r],nav button'); if (!t) return;
@@ -328,7 +415,7 @@ nav button.on{color:#1F2A44;font-weight:700}nav button.on svg{color:#B8933A}
     } catch (e) { /* من غير نت */ }
     try { LOG = await getJSON('data/logins.json'); } catch (e) { LOG = { mgr: [], reg: [] }; }
     cur = LS.getItem('pvWho') || null;
-    var pw = SS.getItem('pvPw') || LS.getItem('pvPw');
+    LS.removeItem('pvPw'); var pw = SS.getItem('pvPw'); /* 131: كل فتحة جديدة للتطبيق بتطلب كلمة السر */
     if (cur && pw) {
       try { P = await open(await getJSON('data/' + cur + '.json'), pw); start(); return; }
       catch (e) { if (e.message === 'bad-password') { LS.removeItem('pvPw'); showLogin('Your password changed. Ask your manager for the new one.'); return; } }
